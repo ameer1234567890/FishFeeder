@@ -23,16 +23,17 @@ Servo servo;
 String logMsg;
 String logTime;
 bool fed = false;
-uint eepromAddr = 0;
+uint eepromAddr[6] = {0, 50, 100, 150, 200, 250};
+int numOfAddr = sizeof(eepromAddr) / sizeof(eepromAddr[0]);
 bool opened = false;
 ESP8266WebServer server(80);
-typedef struct { 
+typedef struct {
   uint set = 0;
   uint hour = 0;
   uint minute = 0;
 } eepromData;
-eepromData feedTimeData;
-eepromData feedTimeDataOld;
+eepromData feedTimeData[6] = {};
+eepromData feedTimeDataOld[6] = {};
 
 void setup() {
   Serial.begin (115200);
@@ -45,17 +46,19 @@ void setup() {
   delay(2000);
 
   EEPROM.begin(512);
-  EEPROM.get(eepromAddr, feedTimeData);
+  for (int i = 0; i < numOfAddr; i++) {
+    EEPROM.get(eepromAddr[i], feedTimeData[i]);
+  }
 
   server.on("/", []() {
     server.send(200, "text/html", \
       "<a href=\"/app\">/app</a><br>"\
       "<a href=\"/log\">/log</a><br>"\
       "<a href=\"/reboot\">/reboot</a><br>"\
-      "<a href=\"/feed\">/feed</a>"\
-      "<a href=\"/setfeedtime?hour=14&minute=44\">/setfeedtime?hour=14&minute=44</a><br>"\
-      "<a href=\"/showfeedtime\">/showfeedtime</a><br>"\
-      "<a href=\"/cancelfeedtime\">/cancelfeedtime</a><br>"\
+      "<a href=\"/feed\">/feed</a><br>"\
+      "<a href=\"/setfeedtime?cycle=0&hour=14&minute=44\">/setfeedtime?cycle=0&hour=14&minute=44</a><br>"\
+      "<a href=\"/showfeedtime?cycle=0\">/showfeedtime?cycle=0</a><br>"\
+      "<a href=\"/cancelfeedtime?cycle=0\">/cancelfeedtime?cycle=0</a><br>"\
       "<br><p><small>"\
       "Powered by: <a href=\"https://github.com/ameer1234567890/FishFeeder\">FishFeeder</a> | "\
       "Chip ID: " + String(ESP.getChipId()) + \
@@ -63,12 +66,67 @@ void setup() {
     );
   });
   server.on("/app", []() {
-    String setoneState;
-    String timeoneState;
-    if (feedTimeData.set == 0) {
-      timeoneState = "disabled";
-    } else {
-      setoneState = "checked";
+    String slotsHtml;
+    String setState[numOfAddr];
+    String timeState[numOfAddr];
+    for (int i = 0; i < numOfAddr; i++) {
+      if (feedTimeData[i].set == 0) {
+        timeState[i] = "disabled";
+      } else {
+        setState[i] = "checked";
+      }
+      slotsHtml = slotsHtml + \
+      "<label class=\"slotname\">SLOT " + i + ":</label>"\
+      "<span class=\"spacer\"></span>"\
+      "<label class=\"switch\">"\
+      "<input type=\"checkbox\" name=\"set" + String(i) + "\" id=\"set" + i + "\" " + setState[i] + ">"\
+      "<span class=\"slider round\"></span>"\
+      "</label>"\
+      "<span class=\"spacer\"></span>"\
+      "<input type=\"time\" id=\"time" + i + "\" name=\"time" + i + "\" "\
+      "value=\"" + feedTimeData[i].hour + ":" + feedTimeData[i].minute + "\" class=\"timeselector\" " + timeState[i] + ">"\
+      "<span class=\"spacer\"></span>"\
+      "<span class=\"tickmark\" id=\"tick" + i + "\">&#10148;</span>"\
+      "<br><br>"\
+      "<script>"\
+      "set" + i + "=document.querySelector('#set" + i + "');"\
+      "time" + i + "=document.querySelector('#time" + i + "');"\
+      "tick" + i + "=document.querySelector('#tick" + i + "');"\
+      "set" + i + ".onchange=function(e){"\
+      "httpRequest=new XMLHttpRequest();"\
+      "if(set" + i + ".checked){time" + i + ".disabled='';"\
+      "httpRequest.open('GET','/setfeedtime?cycle=" + i + "&hour='+time" + i + ".value.substr(0,2)+'&minute='+time" + i + ".value.substr(3,4));"\
+      "httpRequest.send();"\
+      "httpRequest.onreadystatechange=function(){"\
+      "if(httpRequest.readyState==4){if(httpRequest.status!=200){set" + i + ".checked=false;time" + i + ".disabled='disabled';}"\
+      "}}"\
+      "}else{time" + i + ".disabled='disabled';httpRequest.open('GET','/cancelfeedtime?cycle=" + i + "');httpRequest.send();"\
+      "httpRequest.onreadystatechange=function(){"\
+      "if(httpRequest.readyState==4){if(httpRequest.status!=200){set" + i + ".checked=true;time" + i + ".disabled='';}"\
+      "}}"\
+      "}};"\
+      "time" + i + ".oninput=function(e){"\
+      "tick" + i + ".style.visibility='visible';tick" + i + ".classList.add('tick');setTimeout(function(){tick" + i + ".classList.remove('tick');},1000);"\
+      "};"\
+      "tick" + i + ".onclick=function(e){"\
+      "httpRequest=new XMLHttpRequest();"\
+      "tick" + i + ".style.color='#ccc';"\
+      "httpRequest.open('GET','/setfeedtime?cycle=" + i + "&hour='+time" + i + ".value.substr(0,2)+'&minute='+time" + i + ".value.substr(3,4));"\
+      "httpRequest.send();"\
+      "httpRequest.onreadystatechange=function(){"\
+      "if(httpRequest.readyState==4){if(httpRequest.status==200){"\
+      "tick" + i + ".innerHTML='&#10004;';tick" + i + ".classList.add('tick');tick" + i + ".style.color='#34995f';"\
+      "setTimeout(function(){tick" + i + ".innerHTML='&#10148;';tick" + i + ".classList.remove('tick');tick" + i + ".style.color='#2196F3';tick" + i + ".style.visibility='hidden';},1000);"\
+      "}else{"\
+      "tick" + i + ".classList.add('tick');"\
+      "tick" + i + ".innerHTML='&#x26A0;';tick" + i + ".style.color='#F5BD1F';}"\
+      "setTimeout(function(){tick" + i + ".innerHTML='';tick" + i + ".classList.remove('tick');},1000);"\
+      "setTimeout(function(){tick" + i + ".innerHTML='&#10148;';tick" + i + ".classList.add('tick');tick" + i + ".style.color='#2196F3';},1050);"\
+      "setTimeout(function(){tick" + i + ".classList.remove('tick');},2050);"\
+      "}}"\
+      "};"\
+      "</script>"\
+      ;
     }
     server.send(200, "text/html", \
       "<!DOCTYPE html>"\
@@ -95,55 +153,7 @@ void setup() {
       "</head>"\
       "<body>"\
       "<h3>Fish Feeder</h3>"\
-      "<label class=\"slotname\">SLOT 1:</label>"\
-      "<span class=\"spacer\"></span>"\
-      "<label class=\"switch\">"\
-      "<input type=\"checkbox\" name=\"setone\" id=\"setone\" " + setoneState + ">"\
-      "<span class=\"slider round\"></span>"\
-      "</label>"\
-      "<span class=\"spacer\"></span>"\
-      "<input type=\"time\" id=\"timeone\" name=\"timeone\" "\
-      "value=\"" + feedTimeData.hour + ":" + feedTimeData.minute + "\" class=\"timeselector\" " + timeoneState + ">"\
-      "<span class=\"spacer\"></span>"\
-      "<span class=\"tickmark\" id=\"tickone\">&#10148;</span>"\
-      "<script>"\
-      "setone=document.querySelector('#setone');"\
-      "timeone=document.querySelector('#timeone');"\
-      "tickone=document.querySelector('#tickone');"\
-      "setone.onchange=function(e){"\
-      "httpRequest=new XMLHttpRequest();"\
-      "if(setone.checked){timeone.disabled='';"\
-      "httpRequest.open('GET','/setfeedtime?hour='+timeone.value.substr(0,2)+'&minute='+timeone.value.substr(3,4));"\
-      "httpRequest.send();"\
-      "httpRequest.onreadystatechange=function(){"\
-      "if(httpRequest.readyState==4){if(httpRequest.status!=200){setone.checked=false;timeone.disabled='disabled';}"\
-      "}}"\
-      "}else{timeone.disabled='disabled';httpRequest.open('GET','/cancelfeedtime');httpRequest.send();"\
-      "httpRequest.onreadystatechange=function(){"\
-      "if(httpRequest.readyState==4){if(httpRequest.status!=200){setone.checked=true;timeone.disabled='';}"\
-      "}}"\
-      "}};"\
-      "timeone.oninput=function(e){"\
-      "tickone.style.visibility='visible';tickone.classList.add('tick');setTimeout(function(){tickone.classList.remove('tick');},1000);"\
-      "};"\
-      "tickone.onclick=function(e){"\
-      "httpRequest=new XMLHttpRequest();"\
-      "tickone.style.color='#ccc';"\
-      "httpRequest.open('GET','/setfeedtime?hour='+timeone.value.substr(0,2)+'&minute='+timeone.value.substr(3,4));"\
-      "httpRequest.send();"\
-      "httpRequest.onreadystatechange=function(){"\
-      "if(httpRequest.readyState==4){if(httpRequest.status==200){"\
-      "tickone.innerHTML='&#10004;';tickone.classList.add('tick');tickone.style.color='#34995f';"\
-      "setTimeout(function(){tickone.innerHTML='&#10148;';tickone.classList.remove('tick');tickone.style.color='#2196F3';tickone.style.visibility='hidden';},1000);"\
-      "}else{"\
-      "tickone.classList.add('tick');"\
-      "tickone.innerHTML='&#x26A0;';tickone.style.color='#F5BD1F';}"\
-      "setTimeout(function(){tickone.innerHTML='';tickone.classList.remove('tick');},1000);"\
-      "setTimeout(function(){tickone.innerHTML='&#10148;';tickone.classList.add('tick');tickone.style.color='#2196F3';},1050);"\
-      "setTimeout(function(){tickone.classList.remove('tick');},2050);"\
-      "}}"\
-      "};"\
-      "</script>"\
+      + slotsHtml + \
       "</body>"\
       "</html>"\
     );
@@ -185,13 +195,15 @@ void loop() {
   int hour = timeinfo->tm_hour;
   int minute = timeinfo->tm_min;
 
-  if (feedTimeData.set == 1 && hour == feedTimeData.hour && minute == feedTimeData.minute) {
-    if (!fed) {
-      feed();
-      fed = true;
+  for (int i = 0; i < numOfAddr; i++) {
+    if (feedTimeData[i].set == 1 && hour == feedTimeData[i].hour && minute == feedTimeData[i].minute) {
+      if (!fed) {
+        feed();
+        fed = true;
+      }
+    } else {
+      fed = false;
     }
-  } else {
-    fed = false;
   }
 }
 
@@ -245,49 +257,56 @@ void setupTime() {
 
 
 void setFeedTime() {
-  log("I/setter: started setFeedTime upon request from " + server.client().remoteIP().toString());
-  if (server.arg("hour") == "" || server.arg("minute") == "") {
-    server.send(400, "text/plain", "Feed time not specified!");
+  if (server.arg("cycle") == "" || server.arg("hour") == "" || server.arg("minute") == "") {
+    server.send(400, "text/plain", "Feed time or cycle not specified!");
   } else {
+    int feedCycle = server.arg("cycle").toInt();
     int feedTimeHour = server.arg("hour").toInt();
     int feedTimeMinute = server.arg("minute").toInt();
-    feedTimeData.set = 1;
-    feedTimeData.hour = feedTimeHour;
-    feedTimeData.minute = feedTimeMinute;
-    EEPROM.get(eepromAddr, feedTimeDataOld);
-    if (feedTimeDataOld.set == feedTimeData.set && feedTimeDataOld.hour == feedTimeData.hour && feedTimeDataOld.minute == feedTimeData.minute) {
-      server.send(200, "text/plain", "Feed time already set for " + String(feedTimeData.hour) + ":" + String(feedTimeData.minute));
+    feedTimeData[feedCycle].set = 1;
+    feedTimeData[feedCycle].hour = feedTimeHour;
+    feedTimeData[feedCycle].minute = feedTimeMinute;
+    EEPROM.get(eepromAddr[feedCycle], feedTimeDataOld[feedCycle]);
+    if (feedTimeDataOld[feedCycle].set == feedTimeData[feedCycle].set && feedTimeDataOld[feedCycle].hour == feedTimeData[feedCycle].hour && feedTimeDataOld[feedCycle].minute == feedTimeData[feedCycle].minute) {
+      server.send(200, "text/plain", "Feed time already set to " + String(feedTimeData[feedCycle].hour) + ":" + String(feedTimeData[feedCycle].minute) + " for cycle " + feedCycle);
     } else {
-      EEPROM.put(eepromAddr, feedTimeData);
+      EEPROM.put(eepromAddr[feedCycle], feedTimeData[feedCycle]);
       EEPROM.commit();
-      server.send(200, "text/plain", "Feed time set for " + String(feedTimeData.hour) + ":" + String(feedTimeData.minute));
+      server.send(200, "text/plain", "Feed time set to " + String(feedTimeData[feedCycle].hour) + ":" + String(feedTimeData[feedCycle].minute) + " for cycle " + feedCycle);
+      log("I/setter: Feed cycle " + String(feedCycle) + " set to " + String(feedTimeData[feedCycle].hour) + ":" + String(feedTimeData[feedCycle].minute) + " upon request from " + server.client().remoteIP().toString());
     }
   }
-  log("I/setter: completed setFeedTime");
 }
 
 
 void showFeedTime() {
-  log("I/setter: started showFeedTime upon request from " + server.client().remoteIP().toString());
-  if (feedTimeData.set == 0) {
-    server.send(200, "text/plain", "No feed time set");
+  if (server.arg("cycle") == "") {
+    server.send(400, "text/plain", "Feed cycle not specified!");
   } else {
-    EEPROM.get(eepromAddr, feedTimeData);
-    server.send(200, "text/plain", "Feed time is set for " + String(feedTimeData.hour) + ":" + String(feedTimeData.minute));
+    int feedCycle = server.arg("cycle").toInt();
+    if (feedTimeData[feedCycle].set == 0) {
+      server.send(200, "text/plain", "No feed time set");
+    } else {
+      EEPROM.get(eepromAddr[feedCycle], feedTimeData[feedCycle]);
+      server.send(200, "text/plain", "Feed time is set to " + String(feedTimeData[feedCycle].hour) + ":" + String(feedTimeData[feedCycle].minute) + " for cycle " + feedCycle);
+    }
   }
-  log("I/setter: completed showFeedTime");
 }
 
 
 void cancelFeedTime() {
-  log("I/setter: started cancelFeedTime upon request from " + server.client().remoteIP().toString());
-  if (EEPROM.read(eepromAddr) == 0) {
-    server.send(200, "text/plain", "No feed time set");
+  if (server.arg("cycle") == "") {
+    server.send(400, "text/plain", "Feed cycle not specified!");
   } else {
-    EEPROM.write(0, 0);
-    EEPROM.commit();
-    feedTimeData.set = 0;
-    server.send(200, "text/plain", "Feed time cancelled");
+    int feedCycle = server.arg("cycle").toInt();
+    if (EEPROM.read(eepromAddr[feedCycle]) == 0) {
+      server.send(200, "text/plain", "No feed time set");
+    } else {
+      EEPROM.write(eepromAddr[feedCycle], 0);
+      EEPROM.commit();
+      feedTimeData[feedCycle].set = 0;
+      server.send(200, "text/plain", "Feed time cancelled for cycle " + feedCycle);
+      log("I/setter: Feed cycle " + String(feedCycle) + " cancelled upon request from " + server.client().remoteIP().toString());
+    }
   }
-  log("I/setter: completed cancelFeedTime");
 }
